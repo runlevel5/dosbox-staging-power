@@ -1,0 +1,14 @@
+# Cross-compilation dependencies for PPC64LE on Ubuntu 24.04
+# These packages are installed with :ppc64el architecture suffix
+# for use with the gcc-powerpc64le-linux-gnu cross-compiler toolchain.
+
+# Cross-compiler toolchain (native arch)
+gcc-powerpc64le-linux-gnu
+g++-powerpc64le-linux-gnu
+
+# Build tools (native arch)
+meson
+ninja-build
+pkg-config
+python3-setuptools
+ccache

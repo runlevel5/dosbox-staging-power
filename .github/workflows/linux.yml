@@ -1,4 +1,4 @@
-name: Linux builds
+name: PPC64LE build
 permissions: read-all
 
 on:
@@ -25,219 +25,86 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  generate_release_notes:
-    name:    Generate release notes
-    runs-on: ubuntu-latest
+  build_ppc64le:
+    name:    Cross-compile for PPC64LE
+    runs-on: ubuntu-24.04
     if:      github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-        with:
-          submodules: false
-
-      - name: Set common vars
-        uses: ./.github/actions/set-common-vars
-
-      - name: Generate release notes HTML
-        uses: ./.github/actions/generate-release-notes
-        with:
-          output_path: release-notes.html
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          git_hash: ${{ github.sha }}
-
-      - name: Upload release notes artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: release-notes-html
-          path: release-notes.html
-          retention-days: 1
-
-  build_linux:
-    name:    ${{ matrix.conf.name }} ${{ matrix.arch }}
-    runs-on: ${{ matrix.conf.os }}${{ matrix.arch == 'arm64' && '-arm' || '' }}
-    if:      github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
-    strategy:
-      matrix:
-#       TODO enable arm64 builds
-#        arch: [x64, arm64]
-        arch: [x64]
-        conf:
-          - name: GCC 12, Ubuntu 22.04
-            os: ubuntu-22.04
-            cmake_preset: release-linux-vcpkg
-            cc:  gcc
-            cxx: g++
-            max_warnings: 0
-
-          - name: Clang 15, Ubuntu 22.04
-            os: ubuntu-22.04
-            cmake_preset: release-linux-vcpkg
-            cc:  clang
-            cxx: clang++
-            max_warnings: 0
-
-          - name: GCC 12, Ubuntu 22.04, debugger build
-            os: ubuntu-22.04
-            cmake_preset: debug-linux-vcpkg
-            cmake_flags: -DOPT_HEAVY_DEBUGGER=ON
-            cc:  gcc
-            cxx: g++
-            max_warnings: 0
-
-          # TODO turn this into a minimal build target once we have CMake
-          # feature toggling implemented
-          - name: GCC 11, Ubuntu 22.04
-            os: ubuntu-22.04
-            cmake_preset: release-linux-vcpkg
-            cc:  gcc
-            cxx: g++
-            max_warnings: 0
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
           submodules: false
 
-      - name: Set common vars
-        uses: ./.github/actions/set-common-vars
+      - name: Add ppc64el architecture
+        run: |
+          sudo dpkg --add-architecture ppc64el
+          sudo apt-get update
 
-      - name: Set up CMake
-        uses: lukka/get-cmake@f176ccd3f28bda569c43aae4894f06b2435a3375 # v4.2.3
-
-      - name: Install dependencies
+      - name: Install cross-compiler toolchain
         run: |
           export DEBIAN_FRONTEND=noninteractive
-          sudo apt-get update
-          sudo apt-get install -y $(cat packages/ubuntu-22.04-apt.txt)
+          sudo apt-get install -y \
+            gcc-powerpc64le-linux-gnu \
+            g++-powerpc64le-linux-gnu \
+            meson \
+            ninja-build \
+            pkg-config \
+            python3-setuptools \
+            ccache
 
-      - name: Set up vcpkg
-        uses: ./.github/actions/setup-vcpkg
-        with:
-          name_os: linux
-          arch: "${{ matrix.arch }}"
-          compiler: "${{ matrix.conf.cc }}"
+      - name: Install ppc64el dev libraries
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get install -y \
+            libasound2-dev:ppc64el \
+            libatomic1:ppc64el \
+            libfluidsynth-dev:ppc64el \
+            libopusfile-dev:ppc64el \
+            libpng-dev:ppc64el \
+            libsdl2-dev:ppc64el \
+            libsdl2-net-dev:ppc64el \
+            libslirp-dev:ppc64el \
+            libspeexdsp-dev:ppc64el \
+            libavcodec-dev:ppc64el \
+            libavutil-dev:ppc64el \
+            libswscale-dev:ppc64el \
+            libavformat-dev:ppc64el \
+            libswresample-dev:ppc64el \
+            libsamplerate0-dev:ppc64el
 
       - name: Log environment
-        run: ./scripts/ci/log-env.sh
+        run: |
+          echo "=== Cross-compiler ==="
+          powerpc64le-linux-gnu-gcc --version
+          echo "=== Meson ==="
+          meson --version
+          echo "=== Ninja ==="
+          ninja --version
+          echo "=== pkg-config ppc64el paths ==="
+          ls /usr/lib/powerpc64le-linux-gnu/pkgconfig/ || true
+
+      - name: Setup Meson cross-build
+        run: |
+          meson setup build \
+            --cross-file .github/cross/ppc64le-linux-gnu.ini \
+            -Dbuildtype=release \
+            -Ddefault_library=static
 
       - name: Build
         run: |
-          set -xo pipefail
-          export CC=${{ matrix.conf.cc }}
-          export CXX=${{ matrix.conf.cxx }}
-          cmake ${{ matrix.conf.cmake_flags }} --preset ${{ matrix.conf.cmake_preset }}
-          cmake --build --preset ${{ matrix.conf.cmake_preset }} 2>&1 | tee build.log
+          set -o pipefail
+          ninja -C build 2>&1 | tee build.log
 
-      - name: Run tests
+      - name: Verify dynrec config
         run: |
-          set -xo pipefail
-          ctest --preset ${{ matrix.conf.cmake_preset }} 2>&1 | tee tests.log
+          echo "=== Checking dosbox_config.h ==="
+          grep 'C_TARGETCPU' build/dosbox_config.h
+          grep 'C_TARGET_CPU_PPC64LE' build/dosbox_config.h
+          grep 'C_DYNREC' build/dosbox_config.h
+          echo "=== Binary architecture ==="
+          file build/dosbox
 
       - name: Summarize warnings
         env:
-          MAX_WARNINGS: ${{ matrix.conf.max_warnings }}
-        run:  ./scripts/ci/count-warnings.py -lf build.log
-
-
-  build_linux_release:
-    name:    Release build
-    runs-on: ubuntu-22.04
-    needs:   generate_release_notes
-    if:      github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-        with:
-          submodules: false
-
-      - name: Set common vars
-        uses: ./.github/actions/set-common-vars
-
-      - name: Set up CMake
-        uses: lukka/get-cmake@f176ccd3f28bda569c43aae4894f06b2435a3375 # v4.2.3
-
-      - name: Install all dependencies
-        run: |
-          export DEBIAN_FRONTEND=noninteractive
-          sudo apt-get update
-          sudo apt-get install -y $(cat packages/ubuntu-22.04-apt.txt)
-
-      - name: Set up vcpkg
-        uses: ./.github/actions/setup-vcpkg
-        with:
-          name_os: linux
-          arch: "x64"
-          compiler: "gcc"
-
-      - name: Log environment
-        run: ./scripts/ci/log-env.sh
-
-      - name: Build release
-        run: |
-          set -x
-          cmake --preset release-linux-vcpkg
-          cmake --build --preset release-linux-vcpkg
-
-      - name: Dump workspace contents
-        run: find $RUNNER_WORKSPACE
-
-      - name: Verify executable RPATH
-        run: |
-          set -x
-          objdump -x build/release-linux/dosbox | grep \$ORIGIN/lib
-
-      - name: Package
-        run: |
-          echo "*** dosbox transitive deps:"
-          ldd build/release-linux/dosbox
-
-          ./scripts/packaging/create-package.sh \
-              -p linux \
-              build/release-linux \
-              "dosbox-staging-linux-x86_64-$DOSBOX_VERSION_AND_HASH"
-
-
-      - name: Inject external vcpkg dependencies
-        run: |
-          set -x
-          ZIP_NAME=dosbox-vcpkg-deps-linux-x86_64.zip
-
-          wget -nv https://github.com/dosbox-staging/dosbox-staging-ext/releases/download/$VCPKG_EXT_DEPS_VERSION/$ZIP_NAME
-          unzip $ZIP_NAME -d vcpkg-deps
-
-          LIB_DIR="dosbox-staging-linux-x86_64-$DOSBOX_VERSION_AND_HASH/lib"
-          mkdir $LIB_DIR
-          cp vcpkg-deps/release/* $LIB_DIR
-
-
-      - name:  Inject Nuked-SC55-CLAP plugin
-        run: |
-          set -x
-          ZIP_NAME=Nuked-SC55-CLAP-linux-x86_64-$NUKED_SC55_CLAP_VERSION.zip
-
-          curl -L https://github.com/johnnovak/Nuked-SC55-CLAP/releases/download/$NUKED_SC55_CLAP_VERSION/$ZIP_NAME -o $ZIP_NAME
-          unzip $ZIP_NAME -d nuked-sc55-clap
-
-          PLUGINS_DIR="dosbox-staging-linux-x86_64-$DOSBOX_VERSION_AND_HASH/plugins"
-          mkdir $PLUGINS_DIR
-          cp nuked-sc55-clap/* $PLUGINS_DIR
-
-      - name: Download release notes HTML
-        uses: actions/download-artifact@v8
-        with:
-          name: release-notes-html
-          path: "dosbox-staging-linux-x86_64-${{ env.DOSBOX_VERSION_AND_HASH }}"
-
-      - name: Create tarball
-        # Upload tarball instead of a zip file to preserve file attributes
-        run: |
-          tar -cJf "dosbox-staging-linux-x86_64-$DOSBOX_VERSION_AND_HASH.tar.xz" \
-              "dosbox-staging-linux-x86_64-$DOSBOX_VERSION_AND_HASH"
-
-      - name: Upload tarball
-        uses: actions/upload-artifact@v7
-        with:
-          name: dosbox-staging-linux-x86_64-${{ env.DOSBOX_VERSION_AND_HASH }}.tar.xz
-          path: dosbox-staging-linux-x86_64-${{ env.DOSBOX_VERSION_AND_HASH }}.tar.xz
-          archive: false
+          MAX_WARNINGS: 0
+        run: python3 ./scripts/ci/count-warnings.py -lf build.log
