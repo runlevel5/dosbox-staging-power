@@ -8,6 +8,9 @@
 # Defaults
 conf_data.set('C_TARGETCPU', 'UNKNOWN')
 conf_data.set('C_UNALIGNED_MEMORY', 0)
+conf_data.set10('C_TARGET_CPU_X86', false)
+conf_data.set10('C_TARGET_CPU_ARM', false)
+conf_data.set10('C_TARGET_CPU_PPC64LE', false)
 
 per_page_w_or_x_pref = get_option('per_page_w_or_x')
 conf_data.set10('C_PER_PAGE_W_OR_X', per_page_w_or_x_pref.auto() or per_page_w_or_x_pref.enabled())
@@ -47,6 +50,15 @@ foreach line : core_selection
         conf_data.set('C_TARGETCPU', target_cpu)
         conf_data.set('C_UNALIGNED_MEMORY', unaligned_mem)
         conf_data.set(dynrec_define, 1)
+
+        # Set C_TARGET_CPU_* boolean for the matched target
+        if target_cpu == 'X86_64' or target_cpu == 'X86'
+            conf_data.set10('C_TARGET_CPU_X86', true)
+        elif target_cpu == 'ARMV8LE' or target_cpu == 'ARMV7LE' or target_cpu == 'ARMV4LE'
+            conf_data.set10('C_TARGET_CPU_ARM', true)
+        elif target_cpu == 'PPC64LE'
+            conf_data.set10('C_TARGET_CPU_PPC64LE', true)
+        endif
 
         if per_page_w_or_x_pref.auto()
             conf_data.set('C_PER_PAGE_W_OR_X', per_page_w_or_x)

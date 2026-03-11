@@ -38,6 +38,7 @@
 // Target CPU we're compiling for; only one of these can be 1
 #cmakedefine01 C_TARGET_CPU_ARM
 #cmakedefine01 C_TARGET_CPU_X86
+#cmakedefine01 C_TARGET_CPU_PPC64LE
 
 // Define to 1 if target CPU supports unaligned memory access
 #cmakedefine01 C_UNALIGNED_MEMORY

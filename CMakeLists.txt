@@ -260,8 +260,9 @@ int main() {
 check_cxx_source_compiles("${TEST_CODE_BUILTIN_CLEAR_CACHE}"
                           HAVE_BUILTIN_CLEAR_CACHE)
 
-set(C_TARGET_CPU_ARM    OFF)
-set(C_TARGET_CPU_X86    OFF)
+set(C_TARGET_CPU_ARM      OFF)
+set(C_TARGET_CPU_X86      OFF)
+set(C_TARGET_CPU_PPC64LE  OFF)
 
 option(OPT_FORCE_DYNREC "Force DYNREC dynamic recompiler (not x86-64 optimized)" OFF)
 
@@ -292,6 +293,16 @@ elseif (CMAKE_SYSTEM_PROCESSOR  STREQUAL "arm64"   OR
   set(C_DYNREC           ON)
   set(C_FPU_X86          OFF)
   set(C_UNALIGNED_MEMORY OFF)
+
+elseif (CMAKE_SYSTEM_PROCESSOR  STREQUAL "ppc64le" OR
+        CMAKE_SYSTEM_PROCESSOR  STREQUAL "powerpc64le")
+
+  set(C_TARGET_CPU_PPC64LE ON)
+
+  set(C_DYNAMIC_X86      OFF)
+  set(C_DYNREC           ON)
+  set(C_FPU_X86          OFF)
+  set(C_UNALIGNED_MEMORY ON)
 
 else()
   message(FATAL_ERROR "Unknown processor ${CMAKE_SYSTEM_PROCESSOR}")
