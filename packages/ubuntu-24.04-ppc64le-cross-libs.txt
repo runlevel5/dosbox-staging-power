@@ -1,0 +1,17 @@
+# ppc64el multiarch dev libraries for cross-compilation on Ubuntu 24.04
+# Install these with: sudo apt-get install -y $(cat this-file)
+libasound2-dev:ppc64el
+libatomic1:ppc64el
+libfluidsynth-dev:ppc64el
+libopusfile-dev:ppc64el
+libpng-dev:ppc64el
+libsdl2-dev:ppc64el
+libsdl2-net-dev:ppc64el
+libslirp-dev:ppc64el
+libspeexdsp-dev:ppc64el
+libavcodec-dev:ppc64el
+libavutil-dev:ppc64el
+libswscale-dev:ppc64el
+libavformat-dev:ppc64el
+libswresample-dev:ppc64el
+libsamplerate0-dev:ppc64el

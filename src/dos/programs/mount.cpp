@@ -33,41 +33,95 @@ void MOUNT::ListMounts()
 {
 	const std::string header_drive = MSG_Get("PROGRAM_MOUNT_STATUS_DRIVE");
 	const std::string header_type  = MSG_Get("PROGRAM_MOUNT_STATUS_TYPE");
+	const std::string header_path  = MSG_Get("PROGRAM_MOUNT_STATUS_PATH");
 	const std::string header_label = MSG_Get("PROGRAM_MOUNT_STATUS_LABEL");
 
 	const int console_width = real_readw(BIOSMEM_SEG, BIOSMEM_NB_COLS);
 	const auto width_drive  = static_cast<int>(header_drive.length());
+	const auto width_type   = 16;
 	const auto width_label  = std::max(minimum_column_length,
                                           static_cast<int>(header_label.size()));
-	const auto width_type   = console_width - 3 - width_drive - width_label;
-	if (width_type < 0) {
+	const auto width_path   = console_width - 4 - width_drive - width_type -
+	                        width_label;
+
+	if (width_path < 0) {
 		LOG_WARNING("Message is too long.");
 		return;
 	}
 
 	auto print_row = [&](const std::string& txt_drive,
 	                     const std::string& txt_type,
+	                     const std::string& txt_path,
 	                     const std::string& txt_label) {
-		WriteOut("%-*s %-*s %-*s\n",
+		WriteOut("%-*s %-*s %-*s %-*s\n",
 		         width_drive,
 		         txt_drive.c_str(),
 		         width_type,
 		         txt_type.c_str(),
+		         width_path,
+		         txt_path.c_str(),
 		         width_label,
 		         txt_label.c_str());
 	};
 
-	WriteOut(MSG_Get("PROGRAM_MOUNT_STATUS_1"));
-	print_row(header_drive, header_type, header_label);
-	const std::string horizontal_divider(console_width, '-');
+	WriteOut("\n");
+	print_row(convert_ansi_markup("[color=white]") + header_drive,
+	          header_type,
+	          header_path,
+	          header_label + convert_ansi_markup("[reset]"));
+
+	// Make a horizontal divider that draws "-" underneath the headers,
+	// using width_drive, width_type, width_path, and width_label to
+	// determine how long each section should be
+	const std::string horizontal_divider = std::string(width_drive, '-') + " " +
+	                                       std::string(width_type, '-') + " " +
+	                                       std::string(width_path, '-') + " " +
+	                                       std::string(width_label, '-') + "\n";
 	WriteOut_NoParsing(horizontal_divider);
 
 	bool found_drives = false;
 	for (uint8_t d = 0; d < DOS_DRIVES; d++) {
 		if (Drives[d]) {
-			print_row(std::string{drive_letter(d)},
-			          Drives[d]->GetInfoString(),
-			          To_Label(Drives[d]->GetLabel()));
+			const auto& images = DriveManager::GetFilesystemImages(d);
+
+			// Render rows for drives holding multiple loaded images
+			if (images.size() > 1) {
+				bool first = true;
+				for (const auto& img : images) {
+					auto type = img->GetTypeString();
+					auto path = img->GetInfo();
+
+					std::string drive_letter_str =
+					        first ? convert_ansi_markup(
+					                        " [color=light-cyan]" +
+					                        std::string{drive_letter(
+					                                d)} +
+					                        ":[reset]  ")
+					              : "";
+					std::string label_str =
+					        first ? To_Label(Drives[d]->GetLabel())
+					              : "";
+					std::string type_str = first ? type : "";
+
+					print_row(drive_letter_str,
+					          type_str,
+					          truncate_path(path, width_path),
+					          label_str);
+					first = false;
+				}
+			} else {
+				// Render singular drive logic
+				auto type = Drives[d]->GetTypeString();
+				auto path = Drives[d]->GetInfo();
+
+				print_row(convert_ansi_markup(
+				                  " [color=light-cyan]" +
+				                  std::string{drive_letter(d)} +
+				                  ":[reset]  "),
+				          type,
+				          truncate_path(path, width_path),
+				          To_Label(Drives[d]->GetLabel()));
+			}
 			found_drives = true;
 		}
 	}
@@ -75,8 +129,8 @@ void MOUNT::ListMounts()
 	if (!found_drives) {
 		WriteOut(MSG_Get("PROGRAM_IMGMOUNT_STATUS_NONE"));
 	}
+	WriteOut("\n");
 }
-
 void MOUNT::ShowUsage()
 {
 	MoreOutputStrings output(*this);
@@ -120,21 +174,39 @@ bool MOUNT::AddWildcardPaths(const std::string& path_arg,
 	return true;
 }
 
-void MOUNT::WriteMountStatus(const char* image_type,
-                             const std::vector<std::string>& images, char drive_letter)
+void MOUNT::WriteMountStatus(const std::string& image_type,
+                             const std::vector<std::string>& images,
+                             char drive_letter, bool readonly)
 {
-	constexpr auto EndPunctuation = "";
+	const size_t term_width = INT10_GetTextColumns();
+	constexpr auto Indent   = "  ";
+	const auto indent_size = strlen(Indent);
+	std::string images_str  = {};
 
-	const auto images_str = join_with_commas(images,
-	                                         MSG_Get("CONJUNCTION_AND"),
-	                                         EndPunctuation);
+	if (images.size() == 1) {
+		// If only one image, don't add newlines and just write in one
+		// line:
+		images_str = image_type.c_str() + std::string(" ") + images[0];
+		WriteOut(MSG_Get("PROGRAM_MOUNT_STATUS_2"),
+		         images_str.c_str(),
+		         drive_letter);
+		if (readonly) {
+			WriteOut(MSG_Get("PROGRAM_MOUNT_READONLY"));
+		}
+	} else {
 
-	const std::string type_and_images_str = image_type + std::string(" ") +
-	                                        images_str;
-
-	WriteOut(MSG_Get("PROGRAM_MOUNT_STATUS_2"),
-	         type_and_images_str.c_str(),
-	         drive_letter);
+		for (const auto& image : images) {
+			assert(!image.empty());
+			images_str = images_str.append(
+			        std::string(Indent) +
+			        truncate_path(image, term_width - indent_size) +
+			        std::string("\n"));
+		}
+		WriteOut(MSG_Get("PROGRAM_MOUNT_RESULT"),
+		         image_type.c_str(),
+		         drive_letter,
+		         images_str.c_str());
+	}
 }
 
 bool MOUNT::MountImageFat(MountParameters& params)
@@ -258,7 +330,10 @@ bool MOUNT::MountImageFat(MountParameters& params)
 	}
 	dos.dta(save_dta);
 
-	WriteMountStatus(MSG_Get("MOUNT_TYPE_FAT").c_str(), params.paths, params.drive);
+	std::string mount_message = (params.paths.size() > 1)
+	                                  ? MSG_Get("MOUNT_TYPE_FAT_PLURAL")
+	                                  : MSG_Get("MOUNT_TYPE_FAT");
+	WriteMountStatus(mount_message, params.paths, params.drive, params.roflag);
 
 	const auto fat_image = std::dynamic_pointer_cast<fatDrive>(
 	        fat_images.front());
@@ -342,7 +417,12 @@ bool MOUNT::MountImageIso(MountParameters& params)
 
 	// Print status message (success)
 	WriteOut(MSG_Get("MSCDEX_SUCCESS"));
-	WriteMountStatus(MSG_Get("MOUNT_TYPE_ISO").c_str(), params.paths, params.drive);
+
+	std::string mount_message = (params.paths.size() > 1)
+	                                  ? MSG_Get("MOUNT_TYPE_CDIMAGE_PLURAL")
+	                                  : MSG_Get("MOUNT_TYPE_CDIMAGE");
+	WriteMountStatus(mount_message, params.paths, params.drive, params.roflag);
+
 	return true;
 }
 
@@ -417,10 +497,23 @@ bool MOUNT::MountImage(MountParameters& params)
 bool MOUNT::HandleUnmount()
 {
 	std::string umount = {};
+
+	// Standard order: -u <drive>
 	if (cmd->FindString("-u", umount, false)) {
 		WriteOut(UnmountHelper(umount[0]), toupper(umount[0]));
 		return true;
 	}
+
+	// Reverse order: <drive> -u
+	if (cmd->FindExist("-u", false)) {
+		// Check umount != "-u" to prevent parsing errors if the user
+		// just types "mount -u".
+		if (cmd->FindCommand(1, umount) && !umount.empty() && umount != "-u") {
+			WriteOut(UnmountHelper(umount[0]), toupper(umount[0]));
+			return true;
+		}
+	}
+
 	return false;
 }
 
@@ -435,6 +528,9 @@ void MOUNT::ParseArguments(MountParameters& params, bool& explicit_fs,
 	// Allow aliases or standard image types to pass through
 	if (params.type == "cdrom") {
 		params.type = "iso";
+	}
+	if (params.type == "fdd") {
+		params.type = "floppy";
 	}
 
 	params.roflag = cmd->FindExist("-ro", true);
@@ -491,7 +587,8 @@ void MOUNT::ParseGeometry(MountParameters& params)
 		// parsing below. If it is unknown, we error out later.
 		NOTIFY_DisplayWarning(Notification::Source::Console,
 		                      "MOUNT",
-		                      "PROGRAM_MOUNT_ILL_TYPE");
+		                      "PROGRAM_MOUNT_ILL_TYPE",
+		                      params.type.c_str());
 		return;
 	}
 
@@ -656,35 +753,60 @@ bool MOUNT::ParseDrive(MountParameters& params, bool explicit_fs)
 	return true;
 }
 
+std::string MOUNT::ApplyRelativePath(const std::string& path,
+                                     bool is_relative_to_last_config) const
+{
+	if (is_relative_to_last_config && !control->config_files.empty() &&
+	    !std_fs::path(path).is_absolute()) {
+		auto last_config_dir = control->config_files.back();
+		const auto pos       = last_config_dir.rfind(CROSS_FILESPLIT);
+
+		last_config_dir.erase(pos == std::string::npos ? 0 : pos);
+		if (!last_config_dir.empty()) {
+			return last_config_dir + CROSS_FILESPLIT + path;
+		}
+	}
+	return path;
+}
+
+// Translates a DOS path to a host path if the DOS path is currently mapped as a
+// drive. Returns an empty string if it cannot be translated.
+std::string MOUNT::GetDosMappedHostPath(const std::string& dos_path) const
+{
+	// DOS_MakeName requires a writable buffer
+	auto fullname_buf = std::array<char, CROSS_LEN>{};
+	uint8_t drive_idx = 0;
+
+	if (DOS_MakeName(dos_path.data(), fullname_buf.data(), &drive_idx)) {
+
+		if (Drives.at(drive_idx) &&
+		    Drives.at(drive_idx)->GetType() == DosDriveType::Local) {
+
+			if (const auto local_drive = std::dynamic_pointer_cast<localDrive>(
+			            Drives.at(drive_idx))) {
+				return local_drive->MapDosToHostFilename(
+				        fullname_buf.data());
+			}
+		}
+	}
+	return "";
+}
+
 // Returns true if processed successfully (even if it means it found an image
 // and decided to mount it) Returns false on failure.
 bool MOUNT::ProcessPaths(MountParameters& params, bool path_relative_to_last_config)
 {
-	std::string final_path;
+	std::string final_path = {};
+
 	// Get the first path argument
 	if (!cmd->FindCommand(2, final_path) || final_path.empty()) {
 		ShowUsage();
 		return false;
 	}
 
-	// Expand ~ to home directory
-	final_path = resolve_home(final_path).string();
-
-	// Resolve first path
-	std::string path_arg_1 = final_path;
-	if (path_relative_to_last_config && control->config_files.size() &&
-	    !std_fs::path(path_arg_1).is_absolute()) {
-		std::string lastconfigdir =
-		        control->config_files[control->config_files.size() - 1];
-		std::string::size_type pos = lastconfigdir.rfind(CROSS_FILESPLIT);
-		if (pos == std::string::npos) {
-			pos = 0;
-		}
-		lastconfigdir.erase(pos);
-		if (lastconfigdir.length()) {
-			path_arg_1 = lastconfigdir + CROSS_FILESPLIT + path_arg_1;
-		}
-	}
+	// Expand ~ to home directory and apply relative path logic
+	auto path_arg_1 = ApplyRelativePath(resolve_home(final_path).string(),
+	                                    path_relative_to_last_config);
 
 #if defined(WIN32)
 	// Removing trailing backslash if not root dir so stat will succeed
@@ -693,21 +815,28 @@ bool MOUNT::ProcessPaths(MountParameters& params, bool path_relative_to_last_con
 	}
 #endif
 
-	// Check first path
-	struct stat test;
-	auto stat_ok       = (stat(path_arg_1.c_str(), &test) == 0);
-	auto target_is_dir = stat_ok && S_ISDIR(test.st_mode);
-	auto explicit_image_type = (params.type == "hdd" || params.type == "iso" ||
-	                            params.type == "floppy");
+	// Check first path on the host OS
+	struct stat test = {};
+	auto stat_ok = (stat(path_arg_1.c_str(), &test) == 0);
 
-	const auto has_wildcards = path_arg_1.find_first_of("*?") !=
-	                           std::string::npos;
-	auto is_image_mode = false;
-
-	// Explicit triggers
-	if (explicit_image_type || params.is_drive_number || has_wildcards) {
-		is_image_mode = true;
+	// If not found on the host, check if it is a mounted DOS path
+	if (!stat_ok) {
+		const auto mapped_host_path = GetDosMappedHostPath(path_arg_1);
+		if (!mapped_host_path.empty() &&
+		    stat(mapped_host_path.c_str(), &test) == 0) {
+			stat_ok = true;
+		}
 	}
+
+	const auto target_is_dir       = stat_ok && S_ISDIR(test.st_mode);
+	const auto explicit_image_type = (params.type == "hdd" ||
+	                                  params.type == "iso" ||
+	                                  params.type == "floppy");
+	const auto has_wildcards       = path_arg_1.find_first_of("*?") !=
+	                           std::string::npos;
+
+	auto is_image_mode = explicit_image_type || params.is_drive_number ||
+	                     has_wildcards;
 
 	// If the target is a directory, it is a directory mount,
 	// even if -t floppy was specified (legacy MOUNT behavior).
@@ -722,50 +851,20 @@ bool MOUNT::ProcessPaths(MountParameters& params, bool path_relative_to_last_con
 
 	if (is_image_mode) {
 		// Loop through all remaining arguments
-		uint16_t arg_idx = 2;
-		std::string cur_arg;
+		auto arg_idx = 2;
+		std::string cur_arg = "";
 
 		while (cmd->FindCommand(arg_idx++, cur_arg)) {
-			// Expand ~ to home directory
-			cur_arg = resolve_home(cur_arg).string();
-			// Apply relative path logic to current argument
-			if (path_relative_to_last_config &&
-			    control->config_files.size() &&
-			    !std_fs::path(cur_arg).is_absolute()) {
-				std::string lastconfigdir =
-				        control->config_files.back();
-				auto pos = lastconfigdir.rfind(CROSS_FILESPLIT);
-				if (pos == std::string::npos) {
-					pos = 0;
-				}
-				lastconfigdir.erase(pos);
-				if (!lastconfigdir.empty()) {
-					cur_arg = lastconfigdir +
-					          CROSS_FILESPLIT + cur_arg;
-				}
-			}
+
+			// Expand ~, then apply relative path logic
+			cur_arg = ApplyRelativePath(resolve_home(cur_arg).string(),
+			                            path_relative_to_last_config);
 
 			// Resolve virtual drive letters to host paths first
-			char fullname[CROSS_LEN];
-			char tmp[CROSS_LEN];
-			safe_strcpy(tmp, cur_arg.c_str());
-			uint8_t drive_idx_found;
-			std::string path_to_expand = cur_arg;
-
-			if (DOS_MakeName(tmp, fullname, &drive_idx_found)) {
-				if (Drives.at(drive_idx_found) &&
-				    Drives.at(drive_idx_found)->GetType() ==
-				            DosDriveType::Local) {
-					const auto ldp = std::dynamic_pointer_cast<localDrive>(
-					        Drives.at(drive_idx_found));
-					if (ldp) {
-						// This turns "C:\*.CUE" into
-						// "/home/user/dosbox/c_drive/*.CUE"
-						path_to_expand = ldp->MapDosToHostFilename(
-						        fullname);
-					}
-				}
-			}
+			const auto mapped_path = GetDosMappedHostPath(cur_arg);
+			const auto path_to_expand = mapped_path.empty()
+			                                  ? cur_arg
+			                                  : mapped_path;
 
 			// Now try wildcard expansion on the translated host path
 			if (path_to_expand.find_first_of("*?") != std::string::npos) {
@@ -776,39 +875,24 @@ bool MOUNT::ProcessPaths(MountParameters& params, bool path_relative_to_last_con
 			}
 
 			// Fallback for literal files
-			auto real_path = to_native_path(path_to_expand);
-			std::string final_path = real_path.empty() ? path_to_expand
-			                                           : real_path;
+			const auto real_path = to_native_path(path_to_expand);
+			auto loop_final_path = real_path.empty() ? path_to_expand
+			                                         : real_path;
 
-			if (real_path.empty() || !local_drive_path_exists(real_path.c_str())) {
+			if (real_path.empty() ||
+			    !local_drive_path_exists(real_path.c_str())) {
 				// Try Virtual DOS Drive mapping
-				bool found_on_virtual = false;
+				auto found_on_virtual = false;
 
-				// convert dosbox filename to system filename
-				char fullname[CROSS_LEN];
-				char tmp[CROSS_LEN];
-				safe_strcpy(tmp, cur_arg.c_str());
-				uint8_t dummy;
-				if (DOS_MakeName(tmp, fullname, &dummy)) {
-					if (Drives.at(dummy) &&
-					    Drives.at(dummy)->GetType() ==
-					            DosDriveType::Local) {
-						const auto ldp = std::dynamic_pointer_cast<localDrive>(
-						        Drives.at(dummy));
-						if (ldp) {
-							std::string host_name = ldp->MapDosToHostFilename(
-							        fullname);
-							if (local_drive_path_exists(host_name.c_str())) {
-								final_path = std::move(
-								        host_name);
-								found_on_virtual = true;
-								LOG_MSG("IMGMOUNT: Path '%s' found on virtual drive %c:",
-								        fullname,
-								        drive_letter(dummy));
-							}
-						}
-					}
+				const auto fallback_mapped = GetDosMappedHostPath(
+				        cur_arg);
+
+				if (!fallback_mapped.empty() &&
+				    local_drive_path_exists(fallback_mapped.c_str())) {
+					loop_final_path  = fallback_mapped;
+					found_on_virtual = true;
 				}
+
 				if (!found_on_virtual) {
 					// Try wildcards if strictly not found
 					if (MOUNT::AddWildcardPaths(cur_arg,
@@ -820,16 +904,16 @@ bool MOUNT::ProcessPaths(MountParameters& params, bool path_relative_to_last_con
 
 			// Auto-detect type from FIRST valid file if generic "dir"
 			if (params.paths.empty() && params.type == "dir") {
-				// Check if actually file
-				struct stat t2;
-				if (stat(final_path.c_str(), &t2) == 0 &&
+				struct stat t2 = {};
+				if (stat(loop_final_path.c_str(), &t2) == 0 &&
 				    S_ISREG(t2.st_mode)) {
-					auto ext = final_path.substr(
-					        final_path.find_last_of('.') + 1);
+					auto ext = loop_final_path.substr(
+					        loop_final_path.find_last_of('.') + 1);
 					std::transform(ext.begin(),
 					               ext.end(),
 					               ext.begin(),
 					               ::tolower);
+
 					if (ext == "iso" || ext == "cue" ||
 					    ext == "bin" || ext == "mds" ||
 					    ext == "ccd") {
@@ -843,8 +927,8 @@ bool MOUNT::ProcessPaths(MountParameters& params, bool path_relative_to_last_con
 			}
 
 			// Resolves to absolute canonical path
-			final_path = simplify_path(final_path).string();
-			params.paths.push_back(final_path);
+			loop_final_path = simplify_path(loop_final_path).string();
+			params.paths.push_back(loop_final_path);
 		}
 
 		if (params.paths.empty()) {
@@ -860,7 +944,7 @@ bool MOUNT::ProcessPaths(MountParameters& params, bool path_relative_to_last_con
 			params.mediaid = MediaId::Floppy1_44MB;
 		}
 
-		bool success = MountImage(params);
+		const auto success = MountImage(params);
 		if (success && params.type == "floppy") {
 			incrementFDD();
 		}
@@ -872,11 +956,11 @@ bool MOUNT::ProcessPaths(MountParameters& params, bool path_relative_to_last_con
 		NOTIFY_DisplayWarning(Notification::Source::Console,
 		                      "MOUNT",
 		                      "PROGRAM_MOUNT_ERROR_2",
-		                      final_path.c_str());
+		                      path_arg_1.c_str());
 		return false;
 	}
 
-	MountLocal(params, final_path);
+	MountLocal(params, path_arg_1);
 	return true;
 }
 

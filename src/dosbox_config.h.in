@@ -42,6 +42,11 @@
 // The type of cpu this target has
 #mesondefine C_TARGETCPU
 
+// Target CPU boolean defines (matches CMake C_TARGET_CPU_* convention)
+#mesondefine C_TARGET_CPU_X86
+#mesondefine C_TARGET_CPU_ARM
+#mesondefine C_TARGET_CPU_PPC64LE
+
 // Define to 1 if target CPU supports unaligned memory access
 #mesondefine C_UNALIGNED_MEMORY
 

@@ -39,7 +39,9 @@
 
 // Typical values - do not rely on this, use for optimizations only. If you need
 // to be 100% certain, use the OS specific detection routines.
-#if C_TARGETCPU == ARMV8LE
+#if C_TARGET_CPU_PPC64LE
+constexpr uint32_t HostPageSize = 65536;
+#elif C_TARGET_CPU_ARM
 constexpr uint16_t HostPageSize = 16384;
 #else
 constexpr uint16_t HostPageSize = 4096;
