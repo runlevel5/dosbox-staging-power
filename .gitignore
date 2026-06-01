@@ -100,3 +100,6 @@ cmake_test_discovery_*.json
 
 # Python
 __pycache__
+
+# Generated patch files
+*.patch
