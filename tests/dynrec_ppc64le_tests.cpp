@@ -164,6 +164,41 @@ uint64_t emit_mov_qword(uint64_t imm)
 	return page.seal<uint64_t (*)()>()();
 }
 
+// Emit `gen_mov_dword_to_reg_imm(r3, imm)` and return the loaded value.
+// On POWER10 a wide constant uses one pli instead of lis+ori.
+uint32_t emit_mov_dword(uint32_t imm)
+{
+	JitPage page;
+	gen_mov_dword_to_reg_imm(HOST_R3, imm);
+	return page.seal<uint32_t (*)()>()();
+}
+
+// Emit `gen_add_imm(r3, imm)` and run it on `base` -> r3.
+// On POWER10 a wide immediate uses one paddi instead of addis+addi.
+uint32_t emit_add_imm(uint32_t base, uint32_t imm)
+{
+	JitPage page;
+	gen_add_imm(HOST_R3, imm);
+	return page.seal<uint32_t (*)(uint32_t)>()(base);
+}
+
+// Count host *instructions* emitted by `emit` (a prefixed instruction is one
+// instruction occupying two words: its prefix word has primary opcode 1).
+template <typename F>
+size_t count_insns(F emit)
+{
+	JitPage page;
+	uint32_t* p = reinterpret_cast<uint32_t*>(cache.pos);
+	emit();
+	uint32_t* const end = reinterpret_cast<uint32_t*>(cache.pos);
+	size_t n = 0;
+	while (p < end) {
+		p += ((*p >> 26) == 1) ? 2 : 1; // prefix word -> 8-byte instruction
+		++n;
+	}
+	return n;
+}
+
 // Emit one of the inlined operators from gen_fill_function_ptr() into a
 // patch stanza and run it as f(op1_in_r3, op2_in_r4) -> r3.
 uint32_t emit_op(unsigned flags_type, uint32_t op1, uint32_t op2)
@@ -263,6 +298,51 @@ TEST(DynrecPpc64le, MaterializationCodeSize)
 		EXPECT_LE(bytes, 12u); // 8-byte pla (+ at most one alignment nop)
 	else
 		EXPECT_LE(bytes, 20u); // up to 5 x 4-byte instructions
+}
+
+// 32-bit constant load: pli fast path (POWER10) vs lis/ori, plus the small-
+// immediate li path. Only the low 32 bits are defined for this helper.
+TEST(DynrecPpc64le, MovDwordToRegImm)
+{
+	const uint32_t vals[] = {
+		0x0, 0x1, 0x7FFF, 0x8000, 0xFFFF, 0x10000, 0x7FFF0000,
+		0x80000000, 0xFFFF0000, 0x12345678, 0xDEADBEEF, 0xFFFFFFFF,
+	};
+	for (uint32_t v : vals)
+		EXPECT_EQ(emit_mov_dword(v), v) << "imm=" << std::hex << v;
+}
+
+// 32-bit immediate add: paddi fast path (POWER10) vs addis/addi, plus the
+// no-op (0), single-addi and single-addis paths. Compared at 32 bits.
+TEST(DynrecPpc64le, AddImm)
+{
+	const uint32_t bases[] = {0x0, 0x1000, 0xFFFFFFFF, 0x7FFFFFFF, 0xABCDEF01};
+	const uint32_t imms[]  = {0x0, 0x1, 0x7FFF, 0x8000, 0x10000, 0x12345678,
+	                          0x80000000, 0xFFFF8000, 0xFFFFFFFF};
+	for (uint32_t base : bases)
+		for (uint32_t imm : imms)
+			EXPECT_EQ(emit_add_imm(base, imm), base + imm)
+			        << "base=" << std::hex << base << " imm=" << imm;
+}
+
+// Demonstrates the instruction-count reduction: a wide immediate that needs
+// two instructions on the portable path collapses to one prefixed instruction
+// under ISA 3.1.
+TEST(DynrecPpc64le, WideImmInstructionCount)
+{
+	const uint32_t wide = 0x12345678; // needs both halves
+	const size_t add_n = count_insns([&] { gen_add_imm(HOST_R3, wide); });
+	const size_t mov_n = count_insns([&] { gen_mov_dword_to_reg_imm(HOST_R3, wide); });
+	std::printf("[   INFO   ] drc_isa31=%d: gen_add_imm=%zu insn, "
+	            "gen_mov_dword=%zu insn (wide imm)\n",
+	            static_cast<int>(drc_isa31), add_n, mov_n);
+	if (drc_isa31) {
+		EXPECT_EQ(add_n, 1u);
+		EXPECT_EQ(mov_n, 1u);
+	} else {
+		EXPECT_EQ(add_n, 2u);
+		EXPECT_EQ(mov_n, 2u);
+	}
 }
 
 // --- inlined logical/arithmetic operators -----------------------------------
