@@ -5,6 +5,20 @@
 
 /* PPC64LE/OpenPOWER (little endian) backend */
 
+#include <cstdlib>     // getenv
+#include <sys/auxv.h>  // getauxval, AT_HWCAP2
+
+// Runtime detection of PowerISA 3.1 (POWER10) prefixed-instruction support.
+// Baseline ppc64le builds target POWER8, so prefixed instructions are only
+// emitted when the running CPU advertises them. Set DOSBOX_DRC_NO_ISA31=1 to
+// force the portable path (useful for A/B comparisons).
+static const bool drc_isa31 = [] {
+	constexpr unsigned long kArch31 = 0x00040000UL; // PPC_FEATURE2_ARCH_3_1
+	if (getenv("DOSBOX_DRC_NO_ISA31"))
+		return false;
+	return (getauxval(AT_HWCAP2) & kArch31) != 0;
+}();
+
 // debugging
 #define __ASSERT(x,...) \
     { if(!(x)) { fprintf(stderr, "ASSERT:" __VA_ARGS__); asm("trap\n"); } }
@@ -205,9 +219,60 @@ static HostReg inline gen_addr(int64_t &addr, HostReg dest)
 	return dest;
 }
 
+// --- PowerISA 3.1 prefixed-instruction emitters (POWER10) -------------------
+// A prefixed instruction is 8 bytes and must not cross a 64-byte boundary, so
+// emit a nop first when the prefix word would otherwise land at offset 60.
+static inline void gen_align_prefixed()
+{
+	if (((uintptr_t)cache.pos & 63) == 60)
+		NOP_OP();
+}
+
+// true if v is representable in the signed 34-bit prefixed immediate field
+static inline bool fits_si34(int64_t v)
+{
+	return v >= -(int64_t)0x200000000LL && v <= (int64_t)0x1FFFFFFFFLL;
+}
+
+// pli rt, si : load a 34-bit sign-extended immediate (paddi rt,0,si)
+static inline void gen_pli(HostReg rt, int64_t si)
+{
+	gen_align_prefixed();
+	cache_addd((1u << 26) | (2u << 24) | (uint32_t)((si >> 16) & 0x3FFFF));
+	cache_addd((14u << 26) | ((uint32_t)rt << 21) | (uint32_t)(si & 0xFFFF));
+}
+
+// pla rt, target : load a PC-relative address (paddi rt,0,off,R=1)
+static inline void gen_pla(HostReg rt, uint64_t target)
+{
+	gen_align_prefixed();
+	const int64_t off = (int64_t)target - (int64_t)cache.pos;
+	cache_addd((1u << 26) | (2u << 24) | (1u << 20) | (uint32_t)((off >> 16) & 0x3FFFF));
+	cache_addd((14u << 26) | ((uint32_t)rt << 21) | (uint32_t)(off & 0xFFFF));
+}
+
 // move a 64bit constant value into dest_reg
 static void gen_mov_qword_to_reg_imm(HostReg dest_reg, uint64_t imm)
 {
+	if (drc_isa31) {
+		// 1 prefixed instruction (8 bytes) in place of up to 5 (20 bytes).
+		if (fits_si34((int64_t)imm)) {
+			gen_pli(dest_reg, (int64_t)imm);
+			return;
+		}
+		// Absolute addresses rarely fit si34, but the distance from the code
+		// cache to the target usually does, so prefer PC-relative pla. Predict
+		// the prefix address after a possible alignment nop before checking.
+		const uint8_t* p = cache.pos;
+		if (((uintptr_t)p & 63) == 60)
+			p += 4;
+		if (fits_si34((int64_t)imm - (int64_t)p)) {
+			gen_pla(dest_reg, imm);
+			return;
+		}
+		// otherwise fall through to the portable multi-instruction sequence
+	}
+
 	if (imm & 0xffffffff00000000) {
 		IMM_OP(15, dest_reg, 0, (imm & 0xffff000000000000) >> 48); // lis dest, upper
 		if (imm & 0x0000ffff00000000)
@@ -220,6 +285,11 @@ static void gen_mov_qword_to_reg_imm(HostReg dest_reg, uint64_t imm)
 	}
 	if (imm & 0xffff)
 		IMM_OP(24, dest_reg, dest_reg, (imm & 0x000000000000ffff)); // ori dest, dest, ...
+	// lis/addis sign-extends its immediate, so a constant that fits in 32 bits
+	// but has bit 31 set leaves ones in the upper word; clear them so the full
+	// 64-bit value is correct (unlike gen_mov_dword, here the high bits matter).
+	if (!(imm & 0xffffffff00000000) && (imm & 0x80000000))
+		RLD_OP(30, dest_reg, dest_reg, 0, 32, 0, 0); // clrldi dest, dest, 32
 }
 
 // move a 32bit constant value into dest_reg
