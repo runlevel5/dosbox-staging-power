@@ -181,6 +181,21 @@ uint32_t emit_op(unsigned flags_type, uint32_t op1, uint32_t op2)
 	return fn(op1, op2);
 }
 
+// Emit a 3-operand inlined op (FC_OP1=r3, FC_OP2=r4, FC_OP3=r5) -> r3.
+uint32_t emit_op3(unsigned flags_type, uint32_t op1, uint32_t op2, uint32_t op3)
+{
+	JitPage page;
+	int dummy = 0;
+	gen_fill_function_ptr(page.base(), &dummy, flags_type);
+	reinterpret_cast<uint32_t*>(page.base())[7] = PpcBlr;
+	cache.pos = page.base() + 8 * sizeof(uint32_t);
+	__builtin___clear_cache(reinterpret_cast<char*>(page.base()),
+	                        reinterpret_cast<char*>(cache.pos));
+	EXPECT_EQ(mprotect(page.base(), 4096, PROT_READ | PROT_EXEC), 0);
+	auto fn = reinterpret_cast<uint32_t (*)(uint32_t, uint32_t, uint32_t)>(page.base());
+	return fn(op1, op2, op3);
+}
+
 constexpr uint32_t kValues[] = {
 	0x00000000, 0xFFFFFFFF, 0xDEADBEEF, 0x12345678,
 	0xA5A5A5A5, 0x80000000, 0x00000001, 0x7FFFFFFF,
@@ -188,6 +203,10 @@ constexpr uint32_t kValues[] = {
 
 uint32_t rotl32(uint32_t x, unsigned n) { return n ? (x << n) | (x >> (32 - n)) : x; }
 uint32_t rotr32(uint32_t x, unsigned n) { return n ? (x >> n) | (x << (32 - n)) : x; }
+uint32_t rotl8(uint8_t v, unsigned n)   { return ((v << n) | (v >> (8 - n))) & 0xFF; }
+uint32_t rotr8(uint8_t v, unsigned n)   { return ((v >> n) | (v << (8 - n))) & 0xFF; }
+uint32_t rotl16(uint16_t v, unsigned n) { return ((v << n) | (v >> (16 - n))) & 0xFFFF; }
+uint32_t rotr16(uint16_t v, unsigned n) { return ((v >> n) | (v << (16 - n))) & 0xFFFF; }
 
 // --- gen_and_imm ------------------------------------------------------------
 // Regression coverage for the high-halfword mask: the two-instruction fallback
@@ -269,6 +288,37 @@ TEST(DynrecPpc64le, InlinedUnaryOperators)
 	}
 }
 
+// Byte/word shift variants. Operands are passed pre-zero-extended (as the
+// decoder loads them via lbz/lhz), and results are compared at the operand
+// width. SAR must sign-extend the operand before shifting.
+TEST(DynrecPpc64le, InlinedByteWordShifts)
+{
+	const uint8_t bytes[] = {0x01, 0x7F, 0x80, 0xF0, 0xFF};
+	for (uint8_t b : bytes) {
+		for (unsigned n : {1u, 2u, 7u}) {
+			const uint32_t in = b; // zero-extended byte, as loaded by lbz
+			EXPECT_EQ(emit_op(t_SHLb, in, n) & 0xFF,
+			          static_cast<uint32_t>((b << n) & 0xFF)) << "SHLb";
+			EXPECT_EQ(emit_op(t_SHRb, in, n) & 0xFF,
+			          static_cast<uint32_t>(b >> n)) << "SHRb";
+			EXPECT_EQ(emit_op(t_SARb, in, n) & 0xFF,
+			          static_cast<uint32_t>(static_cast<int8_t>(b) >> n) & 0xFF)
+			        << "SARb b=" << std::hex << (int)b << " n=" << n;
+		}
+	}
+	const uint16_t words[] = {0x0001, 0x7FFF, 0x8000, 0xF000, 0xFFFF};
+	for (uint16_t w : words) {
+		for (unsigned n : {1u, 8u, 15u}) {
+			const uint32_t in = w; // zero-extended word, as loaded by lhz
+			EXPECT_EQ(emit_op(t_SHRw, in, n) & 0xFFFF,
+			          static_cast<uint32_t>(w >> n)) << "SHRw";
+			EXPECT_EQ(emit_op(t_SARw, in, n) & 0xFFFF,
+			          static_cast<uint32_t>(static_cast<int16_t>(w) >> n) & 0xFFFF)
+			        << "SARw w=" << std::hex << w << " n=" << n;
+		}
+	}
+}
+
 // Shift/rotate counts are tested in the range [0,31] where PPC slw/srw/sraw and
 // the rlwnm-based rotates agree with x86's 32-bit semantics.
 TEST(DynrecPpc64le, InlinedShiftsAndRotates)
@@ -282,6 +332,46 @@ TEST(DynrecPpc64le, InlinedShiftsAndRotates)
 			        << "n=" << n;
 			EXPECT_EQ(emit_op(t_ROLd, a, n), rotl32(a, n)) << "n=" << n;
 			EXPECT_EQ(emit_op(t_RORd, a, n), rotr32(a, n)) << "n=" << n;
+		}
+	}
+}
+
+// Byte/word rotates use an rlwimi to replicate the operand before rotlw.
+TEST(DynrecPpc64le, InlinedRotatesByteWord)
+{
+	const uint8_t bytes[] = {0x01, 0x80, 0xF0, 0xA5, 0xFF};
+	for (uint8_t b : bytes) {
+		for (unsigned n : {1u, 3u, 7u}) {
+			EXPECT_EQ(emit_op(t_ROLb, b, n) & 0xFF, rotl8(b, n))
+			        << "ROLb b=" << std::hex << (int)b << " n=" << n;
+			EXPECT_EQ(emit_op(t_RORb, b, n) & 0xFF, rotr8(b, n))
+			        << "RORb b=" << std::hex << (int)b << " n=" << n;
+		}
+	}
+	const uint16_t words[] = {0x0001, 0x8000, 0xF00F, 0xA5A5, 0xFFFF};
+	for (uint16_t w : words) {
+		for (unsigned n : {1u, 8u, 15u}) {
+			EXPECT_EQ(emit_op(t_ROLw, w, n) & 0xFFFF, rotl16(w, n))
+			        << "ROLw w=" << std::hex << w << " n=" << n;
+			EXPECT_EQ(emit_op(t_RORw, w, n) & 0xFFFF, rotr16(w, n))
+			        << "RORw w=" << std::hex << w << " n=" << n;
+		}
+	}
+}
+
+// SHLD/SHRD (double-precision shifts), 32-bit form, counts in [1,31].
+TEST(DynrecPpc64le, InlinedDoubleShifts)
+{
+	for (uint32_t a : kValues) {
+		for (uint32_t b : kValues) {
+			for (unsigned n : {1u, 7u, 16u, 31u}) {
+				EXPECT_EQ(emit_op3(t_DSHLd, a, b, n),
+				          static_cast<uint32_t>((a << n) | (b >> (32 - n))))
+				        << "DSHLd n=" << n;
+				EXPECT_EQ(emit_op3(t_DSHRd, a, b, n),
+				          static_cast<uint32_t>((a >> n) | (b << (32 - n))))
+				        << "DSHRd n=" << n;
+			}
 		}
 	}
 }
