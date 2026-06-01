@@ -63,3 +63,24 @@ quilt import dosbox-staging-restore-ppc64le.patch && quilt push
   PPC_FEATURE2_ARCH_3_1`), so a single binary built with a POWER8 baseline
   (`-mcpu=power8`) stays portable and still uses the POWER10 fast path where
   available.
+
+## FAQ
+
+**Does the JIT backend work on big-endian PPC64 (PPC64BE)?**
+
+No. The backend is little-endian (PPC64LE) only. Big-endian support would
+require restoring the byte-swapping code paths that upstream also removed.
+Contributions adding PPC64BE support are welcome.
+
+**Why not start a separate DOSBox fork?**
+
+Maintaining a full fork is a large amount of work, and it would be hard to
+convince mainstream Linux distributions to package yet another DOSBox fork when
+DOSBox Staging already exists. Staying aligned with DOSBox Staging — and shipping
+PPC64LE support as a downstream patch — keeps the maintenance burden low and the
+path to distribution packaging realistic.
+
+**Will DOSBox Staging change their stance on the PPC64 JIT backend?**
+
+Unknown. Perhaps one day a maintainer will get their hands on POWER hardware and
+take an interest in supporting it again.
