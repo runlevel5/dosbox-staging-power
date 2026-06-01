@@ -884,6 +884,11 @@ static void gen_fill_function_ptr(const uint8_t *pos, void *fct_ptr, Bitu flags_
 		case t_TESTb:
 		case t_TESTw:
 		case t_TESTd:
+			// CMP/TEST produce no register result; with their flags dead the
+			// whole stanza is eliminated. op[1..6] are already blanked above,
+			// but op[0] must be nopped too (otherwise the original stanza's
+			// first word - a stray bl/lis - is left behind).
+			op[0] = NOP;
 			break;
 		case t_INCb:
 		case t_INCw:
