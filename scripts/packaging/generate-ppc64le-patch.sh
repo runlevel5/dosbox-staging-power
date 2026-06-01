@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# SPDX-FileCopyrightText:  2020-2025 The DOSBox POWER Team
+# SPDX-FileCopyrightText:  2020-2026 Cameron Kaiser, Trung Lê
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 #
