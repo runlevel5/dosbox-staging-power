@@ -1,167 +1,86 @@
-# DOSBox Staging
+# DOSBox Staging for POWER
 
-![GPL-2.0-or-later][gpl-badge]
-[![Chat][discord-badge]][discord]
+**DOSBox Staging POWER** is the restoration of dropped Linux PPC64LE JIT backend with the goal of creating downstream patch for Linux packagers to consume. If you run into bugs with PPC64LE, please file [bug report](https://github.com/runlevel5/dosbox-staging-power/issues) here.
 
-**DOSBox Staging** is a modern continuation of DOSBox with advanced features and current development practices.
+## History
 
-It is a (mostly) drop-in replacement for older DOSBox versions—your existing configurations will continue to work, and you will have access to many advanced features.
+- The PPC64LE dynamic recompiler backend was initially written by Cameron
+  Kaiser, documented in
+  [DOSBox JIT on ppc64le and how you can too](https://www.talospace.com/2020/01/dosbox-jit-on-ppc64le-and-how-you-can.html).
+- It was then upstreamed into DOSBox Staging via
+  [pull request #2828](https://github.com/dosbox-staging/dosbox-staging/pull/2828).
+- The DOSBox Staging project later decided to drop PPC64LE support, citing
+  maintenance concerns and a lack of ppc64 expertise
+  ([PR #4796](https://github.com/dosbox-staging/dosbox-staging/pull/4796)).
 
-For a detailed description of the project's scope please refer to the [About](https://www.dosbox-staging.org/about/) page on our website.
+This fork restores that backend and maintains it as a downstream patch.
 
-## Donations
+## Generating the downstream patch
 
-If you enjoy using DOSBox Staging, please [consider a
-donation](https://www.dosbox-staging.org/get-involved/#make-a-donation) to the
-project.
+Linux packagers (Fedora, Debian, Ubuntu, ...) can restore PPC64LE support on
+top of a pristine upstream DOSBox Staging release with a single patch generated
+from this repository.
 
-If you want to help but can't afford a donation, check out the [Get
-involved](https://www.dosbox-staging.org/get-involved/) page of our website
-for other ways to contribute.
+Run the generator from inside a clone of this repository:
 
-
-## Project website
-
-https://www.dosbox-staging.org/
-
-First-time users and people migrating from other DOSBox variants should start by reading the [Getting started guide](https://www.dosbox-staging.org/getting-started/).
-
-## Build status
-
-[![Windows (VisualStudio) build status][build-win-msvc-badge]][build-win-msvc-ci]
-[![macOS build status][build-mac-badge]][build-mac-ci]
-[![Linux x86\_64 build status][build-lin1-badge]][build-lin1-ci]
-
-## Stable release builds
-
-Regular users should use our stable release builds available on our project website:
-
-- [Windows](https://www.dosbox-staging.org/releases/windows/)
-- [macOS](https://www.dosbox-staging.org/releases/macos/)
-- [Linux](https://www.dosbox-staging.org/releases/linux/)
-
-
-## Development builds
-
-Development builds are automatically created on every commit merged to the `main` branch. You need to be logged in to GitHub to download the development builds.
-
-[Development builds]
-
-## Key features for developers
-
-| **Feature**                | **Status**                          |
-| -------------------------- | -------------------------------     |
-| **Version control**        | Git                                 |
-| **Language**               | C++23                               |
-| **Logging**                | Loguru for C++<sup>[3]</sup>        |
-| **Build system**           | CMake + Ninja or Visual Studio 2022 |
-| **Dependency manager**     | vcpkg                               |
-| **CI**                     | Yes                                 |
-| **Static analysis**        | Yes<sup>[1],[2]</sup>               |
-| **Dynamic analysis**       | Yes                                 |
-| **clang-format**           | Yes                                 |
-| **[Development builds]**   | Yes                                 |
-| **Unit tests**             | Yes<sup>[4]</sup>                   |
-
-[1]: https://github.com/dosbox-staging/dosbox-staging/actions/workflows/clang-analysis.yml
-[2]: https://github.com/dosbox-staging/dosbox-staging/actions/workflows/pvs-studio.yml
-[3]: https://github.com/emilk/loguru
-[4]: https://github.com/dosbox-staging/dosbox-staging/tree/main/tests
-[Development builds]: https://www.dosbox-staging.org/releases/development-builds/
-
-## Source code analysis tools
-
-- [PVS-Studio](https://pvs-studio.com/pvs-studio/?utm_source=website&utm_medium=github&utm_campaign=open_source) — C++ static analyser
-- [Pylint](https://pypi.org/project/pylint/) — Python static analyser
-- [markdownlint](https://github.com/DavidAnson/markdownlint) — style checker and linter for Markdown
-- [ShellCheck](https://www.shellcheck.net/) — shell script analysis tool
-
-## Dependencies
-
-DOSBox Staging has the following library dependencies:
-
-| Dependency                                                | Provides feature                                | vcpkg package name | vcpkg version     | Optional?           |
-| --------------------------------------------------------- | ----------------------------------------------- | ------------------ | ----------------- | ------------------- |
-| [FluidSynth](https://www.fluidsynth.org/)                 | General MIDI playback                           | fluidsynth         | 2.5.1             | **no** :red_circle: |
-| [GoogleTest](https://github.com/google/googletest)        | Unit testing (development)                      | gtest              | 1.70.0#2          | yes :green_circle:  |
-| [IIR](https://github.com/berndporr/iir1)                  | Audio filtering                                 | iir1               | 1.10.0            | **no** :red_circle: |
-| [libmt32emu](https://github.com/munt/munt)                | Roland MT-32 and CM-32L emulation               | libmt32emu         | 2.7.1             | yes :green_circle:  |
-| [libpng](http://www.libpng.org/pub/png/libpng.html)       | PNG encoding of screen captures                 | libpng             | 1.6.53            | **no** :red_circle: |
-| [libslirp](https://gitlab.freedesktop.org/slirp/libslirp) | General purpose TCP-IP emulator                 | libslirp           | 4.9.0             | yes :green_circle:  |
-| [Opus File](https://opus-codec.org/)                      | CD Audio playback for Opus-encoded audio tracks | opusfile           | 0.12+20221121#1   | **no** :red_circle: |
-| [SDL 2](https://github.com/libsdl-org/SDL)                | OS-agnostic API for video, audio, and eventing  | sdl2               | 2.32.10 (overlay) | **no** :red_circle: |
-| [SDL_image 2](https://github.com/libsdl-org/SDL_image)    | Image decoding for many popular formats         | sdl2-image         | 2.8.8#2           | **no** :red_circle: |
-| [Asio](https://think-async.com/Asio/)                     | Network API for emulated serial and IPX         | asio               | 1.30.2            | **no** :red_circle: |
-| [SpeexDSP](https://github.com/xiph/speexdsp)              | Audio resampling                                | speexdsp           | 1.2.1#1           | **no** :red_circle: |
-| [zlib-ng](https://github.com/zlib-ng/zlib-ng)             | ZMBV video capture                              | zlib-ng            | 2.3.2             | yes¹ :green_circle: |
-
-_¹ You can use plain old zlib instead._
-
-
-### Dynamically loaded dependencies
-
-**Slirp** is built separately as a dynamic library (via
-vcpkg) and is loaded on-demand at runtime if available. Please refer to the
-[dosbox-staging-ext](https://github.com/dosbox-staging/dosbox-staging-ext)
-project for further details. To check the version of this dependency 
-included in our stable and dev build packages, check out the comments of the
-[releases packages](https://github.com/dosbox-staging/dosbox-staging-ext/releases) of
-the [dosbox-staging-ext](https://github.com/dosbox-staging/dosbox-staging-ext)
-project.
-
-For information on the optional **Nuked SC-55 CLAP** audio plugin, check out
-the [plugin's GitHub repository](https://github.com/johnnovak/Nuked-SC55-CLAP/) (note Nuked SC-55
-CLAP is _not_ a DOSBox Staging project).
-
-
-## Build instructions
-
-Please refer to the platform specific build instructions:
-
-- [Windows](docs/build-windows.md)
-- [macOS](docs/build-macos.md)
-- [Linux](docs/build-linux.md)
-
-
-## Imported branches, community patches, old forks
-
-Upstream commits are imported to this repo in a timely manner,
-see branch [`svn/trunk`].
-
-- [`svn/*`] - branches from SVN
-- [`forks/*`] - code for various abandoned DOSBox forks
-- [`vogons/*`] - community patches posted on the Vogons forum
-
-Git tags matching pattern `svn/*` are pointing to the commits referenced by SVN
-"tag" paths at the time of creation.
-
-Additionally, we attach some optional metadata to the commits in the form of
-[Git notes][git-notes]. To fetch them, run:
-
-``` shell
-git fetch origin "refs/notes/*:refs/notes/*"
+```sh
+./scripts/packaging/generate-ppc64le-patch.sh [output.patch]
 ```
 
-## Website & documentation
+With no argument it writes `dosbox-staging-restore-ppc64le.patch` in the current
+directory. For example:
 
-Please refer to the [documentation guide](DOCUMENTATION.md) before making
-changes to the website or the documentation.
+```sh
+git clone https://github.com/runlevel5/dosbox-staging-power.git
+cd dosbox-staging-power
+./scripts/packaging/generate-ppc64le-patch.sh /tmp/dosbox-staging-ppc64le.patch
+```
 
-[`svn/*`]:     https://github.com/dosbox-staging/dosbox-staging/branches/all?utf8=%E2%9C%93&query=svn%2F
-[`svn/trunk`]: https://github.com/dosbox-staging/dosbox-staging/tree/svn/trunk
-[`vogons/*`]:  https://github.com/dosbox-staging/dosbox-staging/branches/all?utf8=%E2%9C%93&query=vogons%2F
-[`forks/*`]:   https://github.com/dosbox-staging/dosbox-staging/branches/all?utf8=%E2%9C%93&query=forks%2F
-[git-notes]:   https://git-scm.com/docs/git-notes
+The script collects the complete current state of the backend — the restored
+`src/cpu/core_dynrec/risc_ppc64le.h`, the CMake build-system hooks, and every
+later fix and optimisation — and emits a single self-contained unified diff with
+a [DEP-3](https://dep-team.pages.debian.net/deps/dep3/) header. It touches only
+five files and deliberately excludes fork-specific bits (CI workflows,
+cross-compilation package lists). Set `RESTORE_COMMIT=<sha>` to override the
+auto-detected restoration commit.
 
-[gpl-badge]:     https://img.shields.io/badge/license-GPL--2.0--or--later-blue
-[discord-badge]: https://img.shields.io/discord/514567252864008206?color=%237289da&logo=discord&logoColor=white&label=discord
-[discord]:       https://discord.gg/WwAg3Xf
+Apply the patch to an unpacked upstream release tree with any of:
 
-[build-lin1-badge]: https://img.shields.io/github/actions/workflow/status/dosbox-staging/dosbox-staging/linux.yml?label=Linux%20%28x86_64%29
-[build-lin1-ci]:    https://github.com/dosbox-staging/dosbox-staging/actions/workflows/linux.yml?query=branch%3Amain
+```sh
+patch -p1 < dosbox-staging-restore-ppc64le.patch
+# or
+git apply dosbox-staging-restore-ppc64le.patch
+# or, for Debian quilt
+quilt import dosbox-staging-restore-ppc64le.patch && quilt push
+```
 
-[build-win-msvc-badge]: https://img.shields.io/github/actions/workflow/status/dosbox-staging/dosbox-staging/windows-msvc.yml?label=Windows%20%28Visual%20Studio%29
-[build-win-msvc-ci]:    https://github.com/dosbox-staging/dosbox-staging/actions/workflows/windows-msvc.yml?query=branch%3Amain
+### Build notes for packagers
 
-[build-mac-badge]: https://img.shields.io/github/actions/workflow/status/dosbox-staging/dosbox-staging/macos.yml?label=macOS%20%28x86_64%2C%20arm64%29
-[build-mac-ci]:    https://github.com/dosbox-staging/dosbox-staging/actions/workflows/macos.yml?query=branch%3Amain
+- Upstream is CMake-only; configure with the system-libraries preset, e.g.
+  `cmake --preset release-linux`.
+- The backend runs on **POWER8 and later**. POWER10 (PowerISA 3.1) instructions
+  are emitted only when detected at run time (`getauxval(AT_HWCAP2) &
+  PPC_FEATURE2_ARCH_3_1`), so a single binary built with a POWER8 baseline
+  (`-mcpu=power8`) stays portable and still uses the POWER10 fast path where
+  available.
+
+## FAQ
+
+**Does the JIT backend work on big-endian PPC64 (PPC64BE)?**
+
+No. The backend is little-endian (PPC64LE) only. Big-endian support would
+require restoring the byte-swapping code paths that upstream also removed.
+Contributions adding PPC64BE support are welcome.
+
+**Why not start a separate DOSBox fork?**
+
+Maintaining a full fork is a large amount of work, and it would be hard to
+convince mainstream Linux distributions to package yet another DOSBox fork when
+DOSBox Staging already exists. Staying aligned with DOSBox Staging — and shipping
+PPC64LE support as a downstream patch — keeps the maintenance burden low and the
+path to distribution packaging realistic.
+
+**Will DOSBox Staging change their stance on the PPC64 JIT backend?**
+
+Unknown. Perhaps one day a maintainer will get their hands on POWER hardware and
+take an interest in supporting it again.

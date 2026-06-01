@@ -11,6 +11,7 @@ add_executable(dosbox_tests
     dos_memory_struct_tests.cpp
     dosbox_test_fixture.h
     drives_tests.cpp
+    dynrec_ppc64le_tests.cpp
     fraction_tests.cpp
     fs_utils_tests.cpp
     int10_modes_tests.cpp

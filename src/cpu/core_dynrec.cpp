@@ -141,6 +141,9 @@ static_assert(offsetof(core_dynrec_t, readdata) % sizeof(uint32_t) == 0,
 #elif C_TARGET_CPU_ARM
 #include "core_dynrec/risc_armv8le.h"
 
+#elif C_TARGET_CPU_PPC64LE
+#include "core_dynrec/risc_ppc64le.h"
+
 #else
 #error "Unsupported target CPU"
 #endif
