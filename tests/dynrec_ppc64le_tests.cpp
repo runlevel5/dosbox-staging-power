@@ -24,10 +24,16 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
+#include <sys/auxv.h>
 #include <sys/mman.h>
 #include <unistd.h>
+
+// risc_ppc64le.h pulls in <cstdlib>/<sys/auxv.h>; including them here at global
+// scope first means the header's copies are guarded no-ops inside the anonymous
+// namespace below.
 
 namespace {
 
@@ -148,6 +154,16 @@ uint32_t emit_and_imm(uint32_t value, uint32_t mask)
 	return page.seal<uint32_t (*)(uint32_t)>()(value);
 }
 
+// Emit `gen_mov_qword_to_reg_imm(r3, imm)` and return the loaded value.
+// On POWER10 this exercises the ISA 3.1 pli / pla fast paths; everywhere else
+// (and for constants that fit no fast path) the portable lis/ori sequence.
+uint64_t emit_mov_qword(uint64_t imm)
+{
+	JitPage page;
+	gen_mov_qword_to_reg_imm(HOST_R3, imm);
+	return page.seal<uint64_t (*)()>()();
+}
+
 // Emit one of the inlined operators from gen_fill_function_ptr() into a
 // patch stanza and run it as f(op1_in_r3, op2_in_r4) -> r3.
 uint32_t emit_op(unsigned flags_type, uint32_t op1, uint32_t op2)
@@ -192,6 +208,42 @@ TEST(DynrecPpc64le, AndImmExhaustivePatterns)
 		for (uint32_t value : kValues)
 			EXPECT_EQ(emit_and_imm(value, mask), value & mask)
 			        << "mask=" << std::hex << mask << " value=" << value;
+}
+
+// --- 64-bit constant / address materialization -----------------------------
+// Covers the ISA 3.1 pli path (|imm| within signed 34 bits), the multi-
+// instruction fallback (larger constants), and sign-extension edge cases.
+TEST(DynrecPpc64le, MovQwordToRegImm)
+{
+	const uint64_t vals[] = {
+		0x0, 0x1, 0xFFFF, 0x8000, 0x10000,
+		0x80000000ULL, 0xFFFFFFFFULL,        // 32-bit
+		0x100000000ULL, 0x1FFFFFFFFULL,      // top of the signed-34 pli range
+		0x200000000ULL,                      // just past it -> fallback
+		0xFFFFFFFFFFFFFFFFULL,               // -1, sign-extended by pli
+		0x7FFFFFFFFFFFFFFFULL, 0x8000000000000000ULL,
+		0xDEADBEEFCAFE1234ULL, 0x123456789ABCDEF0ULL,
+	};
+	for (uint64_t v : vals)
+		EXPECT_EQ(emit_mov_qword(v), v) << "imm=" << std::hex << v;
+}
+
+// Reports (and bounds) the host code size for materializing a code-cache-local
+// address: 1 prefixed instruction under ISA 3.1, otherwise the lis/ori chain.
+TEST(DynrecPpc64le, MaterializationCodeSize)
+{
+	JitPage page;
+	uint8_t* const start = cache.pos;
+	// A target inside the page is always within PC-relative (pla) range.
+	gen_mov_qword_to_reg_imm(HOST_R3,
+	                         reinterpret_cast<uint64_t>(page.base()) + 64);
+	const size_t bytes = static_cast<size_t>(cache.pos - start);
+	std::printf("[   INFO   ] gen_mov_qword(near addr): drc_isa31=%d -> %zu bytes\n",
+	            static_cast<int>(drc_isa31), bytes);
+	if (drc_isa31)
+		EXPECT_LE(bytes, 12u); // 8-byte pla (+ at most one alignment nop)
+	else
+		EXPECT_LE(bytes, 20u); // up to 5 x 4-byte instructions
 }
 
 // --- inlined logical/arithmetic operators -----------------------------------
