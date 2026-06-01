@@ -251,6 +251,14 @@ static inline void gen_pla(HostReg rt, uint64_t target)
 	cache_addd((14u << 26) | ((uint32_t)rt << 21) | (uint32_t)(off & 0xFFFF));
 }
 
+// paddi rt, ra, si : rt = ra + sign_extend34(si) in one instruction (ra != 0)
+static inline void gen_paddi(HostReg rt, HostReg ra, int64_t si)
+{
+	gen_align_prefixed();
+	cache_addd((1u << 26) | (2u << 24) | (uint32_t)((si >> 16) & 0x3FFFF));
+	cache_addd((14u << 26) | ((uint32_t)rt << 21) | ((uint32_t)ra << 16) | (uint32_t)(si & 0xFFFF));
+}
+
 // move a 64bit constant value into dest_reg
 static void gen_mov_qword_to_reg_imm(HostReg dest_reg, uint64_t imm)
 {
@@ -296,6 +304,13 @@ static void gen_mov_qword_to_reg_imm(HostReg dest_reg, uint64_t imm)
 static void gen_mov_dword_to_reg_imm(HostReg dest_reg, uint32_t imm)
 {
 	if (static_cast<int16_t>(imm) != static_cast<int32_t>(imm)) {
+		// ISA 3.1: one pli replaces lis+ori when both halves are needed.
+		// Upper bits are don't-care here (the value is used as 32-bit), so
+		// pli's sign-extension matches the existing lis behaviour.
+		if (drc_isa31 && (imm & 0x0000ffff)) {
+			gen_pli(dest_reg, static_cast<int32_t>(imm));
+			return;
+		}
 		IMM_OP(15, dest_reg, 0, (imm & 0xffff0000) >> 16); // lis
 		if (imm & 0x0000ffff)
 			IMM_OP(24, dest_reg, dest_reg, (imm & 0x0000ffff)); // ori
@@ -398,6 +413,11 @@ static void gen_add(HostReg reg, void *op)
 static void gen_add_imm(HostReg reg, uint32_t imm)
 {
     if (!imm) return;
+	// ISA 3.1: one paddi replaces addis+addi when both halves are needed.
+	if (drc_isa31 && (int16_t)imm != (int32_t)imm && (int16_t)imm) {
+		gen_paddi(reg, reg, (int32_t)imm);
+		return;
+	}
 	if ((int16_t)imm != (int32_t)imm)
 		IMM_OP(15, reg, reg, (imm+0x8000)>>16); // addis reg,reg,imm@ha
 	if ((int16_t)imm)
