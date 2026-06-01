@@ -2,6 +2,19 @@
 
 **DOSBox Staging POWER** is the restoration of dropped Linux PPC64LE JIT backend with the goal of creating downstream patch for Linux packagers to consume. If you run into bugs with PPC64LE, please file [bug report](https://github.com/runlevel5/dosbox-staging-power/issues) here.
 
+## History
+
+- The PPC64LE dynamic recompiler backend was initially written by Cameron
+  Kaiser, documented in
+  [DOSBox JIT on ppc64le and how you can too](https://www.talospace.com/2020/01/dosbox-jit-on-ppc64le-and-how-you-can.html).
+- It was then upstreamed into DOSBox Staging via
+  [pull request #2828](https://github.com/dosbox-staging/dosbox-staging/pull/2828).
+- The DOSBox Staging project later decided to drop PPC64LE support, citing
+  maintenance concerns and a lack of ppc64 expertise
+  ([PR #4796](https://github.com/dosbox-staging/dosbox-staging/pull/4796)).
+
+This fork restores that backend and maintains it as a downstream patch.
+
 ## Generating the downstream patch
 
 Linux packagers (Fedora, Debian, Ubuntu, ...) can restore PPC64LE support on
