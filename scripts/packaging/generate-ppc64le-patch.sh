@@ -70,16 +70,21 @@ fi
 git cat-file -e "${RESTORE_COMMIT}^{commit}" 2>/dev/null \
     || die "commit '$RESTORE_COMMIT' not found"
 
+# The restoration commit's parent is the pristine upstream state for these
+# files; diffing it against HEAD captures the restoration *and* every later
+# fix/optimisation to the backend (mask/sign-extension fixes, the CMP/TEST
+# fix, the POWER10 ISA 3.1 fast path, ...), not just the first commit.
 BASE_COMMIT="${RESTORE_COMMIT}^"
-SHORT=$(git rev-parse --short "$RESTORE_COMMIT")
+BASE_SHORT=$(git rev-parse --short "$BASE_COMMIT")
+HEAD_SHORT=$(git rev-parse --short HEAD)
 AUTHOR=$(git show -s --format='%an <%ae>' "$RESTORE_COMMIT")
-DATE=$(git show -s --format='%ad' --date=short "$RESTORE_COMMIT")
+DATE=$(git show -s --format='%ad' --date=short HEAD)
 
-# --- Sanity-check that all expected paths exist in the commit ----------------
+# --- Sanity-check that all expected paths exist at HEAD ----------------------
 
 for path in $PATCH_PATHS; do
-    git cat-file -e "${RESTORE_COMMIT}:${path}" 2>/dev/null \
-        || die "expected file '$path' not present in $SHORT; refusing to emit incomplete patch"
+    git cat-file -e "HEAD:${path}" 2>/dev/null \
+        || die "expected file '$path' not present at HEAD; refusing to emit incomplete patch"
 done
 
 # --- Emit the patch ----------------------------------------------------------
@@ -95,19 +100,20 @@ done
     printf ' src/cpu/core_dynrec/risc_ppc64le.h. PPC64LE is little-endian, so it\n'
     printf ' does not need the big-endian code paths that PR also removed.\n'
     printf 'Author: %s\n' "$AUTHOR"
-    printf 'Origin: backport, dosbox-staging-power, commit %s\n' "$SHORT"
+    printf 'Origin: backport, dosbox-staging-power, %s..%s\n' "$BASE_SHORT" "$HEAD_SHORT"
     printf 'Bug: %s\n' "$UPSTREAM_PR"
     printf 'Forwarded: not-needed\n'
     printf 'Last-Update: %s\n' "$DATE"
     printf '\n'
 
-    # Plain unified diff (-p1), independent of current HEAD state. Applies with:
+    # Plain unified diff (-p1) of the complete backend state against pristine
+    # upstream. Applies with:
     #   git apply <patch>      patch -p1 < <patch>      quilt import / push
-    git diff "$BASE_COMMIT" "$RESTORE_COMMIT" -- $PATCH_PATHS
+    git diff "$BASE_COMMIT" HEAD -- $PATCH_PATHS
 } > "$OUTPUT"
 
 # --- Report ------------------------------------------------------------------
 
 LINES=$(wc -l < "$OUTPUT" | tr -d ' ')
-printf 'Wrote %s (%s lines) from commit %s\n' "$OUTPUT" "$LINES" "$SHORT"
+printf 'Wrote %s (%s lines) from %s..%s\n' "$OUTPUT" "$LINES" "$BASE_SHORT" "$HEAD_SHORT"
 printf 'Apply with: patch -p1 < %s   (or: git apply %s)\n' "$OUTPUT" "$OUTPUT"
